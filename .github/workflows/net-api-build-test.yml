@@ -1,0 +1,66 @@
+name: Build and Test workflow for .NET API
+
+on:
+  workflow_call:
+    inputs:
+      # pass in environment through manual trigger, if not passed in, default to 'dev'
+      env:
+        required: true
+        type: string
+        default: 'dev'   
+        # working-directory is added to accommodate monorepo.  For multi repo, defaults to '.', current directory
+      working-directory:
+        required: false
+        type: string
+        default: '.'
+      # pass in .NET version to allow different app requiring different .NET versions to reuse the same workflow, default 6.0.x
+      dotnet-version:
+        required: false
+        type: string
+        default: '6.0.x'
+        
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    outputs:
+      semVer: ${{ steps.gitversion.outputs.semVer }}
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Install GitVersion
+        uses: gittools/actions/gitversion/setup@v0.9.7
+        with:
+          versionSpec: "5.x"
+
+      - name: Determine version
+        id: gitversion
+        uses: gittools/actions/gitversion/execute@v0.9.7
+
+      - name: Setup .NET Core
+        uses: actions/setup-dotnet@v1
+        with:
+          dotnet-version: 6.0.x
+
+      - name: Build and Tag
+        id: build-image
+        env:
+          ECR_REGISTRY: ${{ secrets.ECR_REGISTRY }}
+          ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY_NAME }}
+          IMAGE_TAG: ${{ env.PROJECT_VERSION }}
+        run: dotnet build
+             echo "::set-output name=image::$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: Source-${{ steps.gitversion.outputs.semVer }}
+          path: |
+            src/**/*
+            Dockerfile
+            .dockerignore
+            entrypoint.sh        
+        
+        
