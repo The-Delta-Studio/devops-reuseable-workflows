@@ -1,0 +1,112 @@
+name: Deploy .NET API to Shared ECR 
+
+on:
+  workflow_call:
+    inputs:
+      # pass in environment through manual trigger, if not passed in, default to 'dev'
+      env:
+        required: true
+        type: string
+        default: 'dev'
+      url:
+        required: true
+        type: string
+        default: ''
+      ecr:
+        required: true
+        type: string
+        default: ''
+      aws_region:
+        required: true
+        type: string
+        default: ''  
+      # working-directory is added to accommodate monorepo.  For multi repo, defaults to '.', current directory
+      working-directory:
+        required: false
+        type: string
+        default: '.'
+       
+jobs:
+  deploy-develop:
+    name: Deploy Dev
+    runs-on: ubuntu-latest
+   # needs: [build]
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/develop'
+    environment:
+      name: dev
+      url: ${{ inputs.url }}
+    permissions:
+      id-token: write
+      contents: write
+    steps:
+      - name: Configure Delta Shared AWS
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-region: ${{ inputs.aws_region }}
+          role-to-assume: ${{ secrets.ROLE_TO_ASSUME }}
+          role-session-name: OIDCSession
+
+      - name: Login AWS ECR
+        id: login-ecr-private
+        uses: aws-actions/amazon-ecr-login@v1
+        with:
+          registry-type: private
+
+      - name: Download artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: Source-${{ needs.build.outputs.semVer }}
+          path: Source
+
+      - name: Build, tag and push docker image to Amazon ECR Private
+        working-directory: Source
+        env:
+          REGISTRY: ${{ steps.login-ecr-private.outputs.registry }}
+          REPOSITORY: ${{ inputs.ecr }}
+          SEMVER: ${{ needs.build.outputs.semVer }}
+        run: |
+          echo SemVer: $SEMVER
+          docker build -t $REGISTRY/$REPOSITORY:$SEMVER .
+          docker push $REGISTRY/$REPOSITORY:$SEMVER
+          
+  deploy-stable:
+    name: Deploy Stable
+    runs-on: ubuntu-latest
+   # needs: [build]
+    if: github.event_name != 'pull_request' && startsWith(github.ref,'refs/heads/release/')
+    environment:
+      name: stable
+      url: ${{ inputs.url }}
+    permissions:
+      id-token: write
+      contents: write
+    steps:
+      - name: Configure Delta Shared AWS
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-region: ${{ inputs.aws_region }}
+          role-to-assume: ${{ secrets.ROLE_TO_ASSUME }}
+          role-session-name: OIDCSession
+
+      - name: Login AWS ECR
+        id: login-ecr-private
+        uses: aws-actions/amazon-ecr-login@v1
+        with:
+          registry-type: private
+
+      - name: Download artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: Source-${{ needs.build.outputs.semVer }}
+          path: Source
+
+      - name: Build, tag and push docker image to Amazon ECR Private
+        working-directory: Source
+        env:
+          REGISTRY: ${{ steps.login-ecr-private.outputs.registry }}
+          REPOSITORY: ${{ inputs.ecr }}
+          SEMVER: ${{ needs.build.outputs.semVer }}
+        run: |
+          echo SemVer: $SEMVER
+          docker build -t $REGISTRY/$REPOSITORY:$SEMVER .
+          docker push $REGISTRY/$REPOSITORY:$SEMVER
