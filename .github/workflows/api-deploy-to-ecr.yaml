@@ -33,7 +33,7 @@ jobs:
    # needs: [build]
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/develop'
     environment:
-      name: dev
+      name: ${{ inputs.env || 'dev' }}
       url: ${{ inputs.url }}
     permissions:
       id-token: write
@@ -75,7 +75,7 @@ jobs:
    # needs: [build]
     if: github.event_name != 'pull_request' && startsWith(github.ref,'refs/heads/release/')
     environment:
-      name: stable
+      name: ${{ inputs.env || 'stable' }}
       url: ${{ inputs.url }}
     permissions:
       id-token: write
