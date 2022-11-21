@@ -1,4 +1,4 @@
-name: Deploy Web App to Shared ECR 
+name: Build, Test and Deploy workflow for Vue/ React front-end
 
 on:
   workflow_call:
@@ -25,13 +25,62 @@ on:
         required: false
         type: string
         default: '.'
-                
+      # pass in node version to allow different app requiring different node versions to reuse the same workflow, default 12
+      node-version:
+        required: false
+        type: string
+        default: '12.x'
 jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    outputs:
+      semVer: ${{ steps.gitversion.outputs.semVer }}
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Install GitVersion
+        uses: gittools/actions/gitversion/setup@v0.9.7
+        with:
+          versionSpec: "5.x"
+
+      - name: Cache node_modules
+        uses: actions/cache@v2
+        env:
+          cache-name: cache-node-modules
+        with:
+          path: |
+            ~/.npm
+            ./node_modules
+          key: ${{ runner.os }}-build-${{ env.cache-name }}-${{ hashfiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-build-${{ env.cache-name }}-
+            ${{ runner.os }}-build-
+            ${{ runner.os }}-
+      - name: Install dependencies
+        run: npm install
+
+      - name: Determine version
+        id: gitversion
+        uses: gittools/actions/gitversion/execute@v0.9.7
+
+      - name: Build App
+        run: npm run build
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: Source-${{ steps.gitversion.outputs.semVer }}
+          path: |
+            ./**/*
+            !node_modules    
 
   deploy-develop:
     name: Deploy Dev
     runs-on: ubuntu-latest
-    # needs: [build]
+    needs: [build]
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/develop'
     environment:
       name: dev
@@ -107,7 +156,7 @@ jobs:
   deploy-stable:
     name: Deploy Stable
     runs-on: ubuntu-latest
-    # needs: [build]
+    needs: [build]
     if: |
       github.event_name != 'pull_request' && 
       (
@@ -183,4 +232,5 @@ jobs:
         run: |
           echo SemVer: $SEMVER
           docker build -t $REGISTRY/$REPOSITORY:$SEMVER .
-          docker push $REGISTRY/$REPOSITORY:$SEMVER    
+          docker push $REGISTRY/$REPOSITORY:$SEMVER           
+        

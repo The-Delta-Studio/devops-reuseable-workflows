@@ -1,4 +1,4 @@
-name: Build and Test workflow for .NET API
+name: Build Test and Deploy workflow for .NET API
 
 on:
   workflow_call:
