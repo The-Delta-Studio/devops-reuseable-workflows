@@ -1,0 +1,119 @@
+name: Dev | Build & Push Image
+concurrency:
+  group: ${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+on:
+  workflow_call:
+    inputs:
+      # pass in environment through manual trigger, if not passed in, default to 'dev'
+      env:
+        required: true
+        type: string
+        default: "dev"
+      url:
+        required: true
+        type: string
+        default: ""
+      ecr_repo:
+        required: true
+        type: string
+        default: ""
+      aws_region:
+        required: true
+        type: string
+        default: ""
+      aws_role_name:
+        required: true
+        type: string
+        default: ""
+        # working-directory is added to accommodate monorepo.  For multi repo, defaults to '.', current directory
+      working-directory:
+        required: false
+        type: string
+        default: "."
+      # pass in .NET version to allow different app requiring different .NET versions to reuse the same workflow, default 6.0.x
+      dotnet-version:
+        required: false
+        type: string
+        default: "6.0.x"
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    outputs:
+      semVer: ${{ steps.gitversion.outputs.semVer }}
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Install GitVersion
+        uses: gittools/actions/gitversion/setup@v0.9.7
+        with:
+          versionSpec: "5.x"
+
+      - name: Determine version
+        id: gitversion
+        uses: gittools/actions/gitversion/execute@v0.9.7
+
+      - name: Setup .NET Core
+        uses: actions/setup-dotnet@v1
+        with:
+          dotnet-version: ${{ inputs.aws_region }}
+
+      - name: Build
+        run: dotnet build
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: Source-${{ steps.gitversion.outputs.semVer }}
+          path: |
+            src/**/*
+            Dockerfile
+            .dockerignore
+            *.sln
+            entrypoint.sh
+
+  deploy-develop:
+    name: Deploy Dev
+    runs-on: ubuntu-latest
+    needs: [build]
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/develop'
+    environment:
+      name: ${{ inputs.env }}
+      url: ${{ inputs.url }}
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Configure Delta Shared AWS
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-region: ${{ inputs.aws_region }}
+          role-to-assume: ${{ inputs.aws_role_name }}
+          role-session-name: OIDCSession
+
+      - name: Login AWS ECR
+        id: login-ecr-private
+        uses: aws-actions/amazon-ecr-login@v1
+        with:
+          registry-type: private
+
+      - name: Download artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: Source-${{ needs.build.outputs.semVer }}
+          path: Source
+
+      - name: Build, tag and push docker image to Amazon ECR Private
+        working-directory: Source
+        env:
+          REGISTRY: ${{ steps.login-ecr-private.outputs.registry }}
+          REPOSITORY: ${{ inputs.ecr_repo }}
+          SEMVER: ${{ needs.build.outputs.semVer }}
+        run: |
+          echo SemVer: $SEMVER
+          docker build -t $REGISTRY/$REPOSITORY:$SEMVER .
+          docker push $REGISTRY/$REPOSITORY:$SEMVER
