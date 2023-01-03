@@ -1,0 +1,57 @@
+name: Build
+on:
+  workflow_call:
+    inputs:
+      dotnet-version:
+        required: false
+        type: string
+        description: Version of dotnet you're using. Defaults to 6.0.x
+        default: 6.0.x
+      build-artifact-name:
+        required: false
+        type: string
+        description: Name of the artifact
+        default: Source
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-22.04
+    environment:
+      name: ${{ inputs.environment }}
+      url: ${{ inputs.environment-url }}
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Install GitVersion
+        uses: gittools/actions/gitversion/setup@v0.9.7
+        with:
+          versionSpec: "5.x"
+
+      - name: Determine version
+        id: gitversion
+        uses: gittools/actions/gitversion/execute@v0.9.7
+
+      - name: Setup .NET Core
+        uses: actions/setup-dotnet@v1
+        with:
+          dotnet-version: ${{ inputs.dotnet-version }}
+
+      - name: Build
+        env:
+          SEMVER: ${{ steps.gitversion.outputs.semVer }}
+        run: dotnet build -p:Version=$SEMVER
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ inputs.build-artifact-name }}
+          path: |
+            src/**/*
+            Dockerfile
+            .dockerignore
+            *.sln
+            entrypoint.sh
+      
